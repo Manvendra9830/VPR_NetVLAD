@@ -1,76 +1,122 @@
-# pytorch-NetVlad
+# Visual Place Recognition using NetVLAD and CNN Backbones
 
-Implementation of [NetVlad](https://arxiv.org/abs/1511.07247) in PyTorch, including code for training the model on the Pittsburgh dataset.
+This project implements and evaluates the NetVLAD architecture for the task of Visual Place Recognition (VPR). It provides a complete pipeline for training and testing different CNN backbones on the standard Pittsburgh 30k benchmark dataset.
 
-### Reproducing the paper
+*This work builds upon the PyTorch implementation by Nanne, available [here](https://github.com/Nanne/pytorch-NetVlad).*
 
-Below are the result as compared to the results in third row in the right column of Table 1:
+## My Contributions and Project Focus
 
-|   |R@1|R@5|R@10|
-|---|---|---|---|
-| [NetVlad paper](https://arxiv.org/abs/1511.07247)  | 84.1  | 94.6  | 95.5  |
-| pytorch-NetVlad(alexnet)  | 68.6  | 84.6  | 89.3  |
-| pytorch-NetVlad(vgg16)  | 85.2  | 94.8  | 97.0  |
+While based on an existing implementation, this project includes several key contributions and modifications to enable modern training and evaluation:
 
-Running main.py with train mode and default settings should give similar scores to the ones shown above. Additionally, the model state for the above run is
-available here: https://drive.google.com/open?id=17luTjZFCX639guSVy00OUtzfTQo4AMF2
+-   **Code Portability:** Patched the source code to remove hardcoded paths and ensure it can run on any machine.
+-   **GPU Compatibility:** Corrected device placement issues to ensure the model properly utilizes an available GPU during training.
+-   **Reproducible Pipelines:** Developed and documented clear, end-to-end pipelines for training and evaluating both `AlexNet` and `VGG16` architectures from scratch.
+-   **Result Visualization:** Added a dedicated script (`generate_plots.py`) to compare the performance of different models, which was not present in the original repository.
+-   **Dependency Management:** Modernized the dependency list and instructions for a smoother setup process.
 
-Using this checkpoint and the following command you can obtain the results shown above:
+## About The Project
 
-    python main.py --mode=test --split=val --resume=vgg16_netvlad_checkpoint/
+The goal of Visual Place Recognition is to identify a camera's geographical location by matching its current view against a database of geo-tagged images. This project uses NetVLAD, a powerful aggregation layer, to create a single, robust "global descriptor" vector for each image.
 
-# Setup
+### Dataset: Pittsburgh 30k
 
-## Dependencies
+This project is configured to use the **Pittsburgh 30k (pitts30k)** dataset.
 
-1. [PyTorch](https://pytorch.org/get-started/locally/) (at least v0.4.0)
-2. [Faiss](https://github.com/facebookresearch/faiss)
-3. [scipy](https://www.scipy.org/)
-    - [numpy](http://www.numpy.org/)
-    - [sklearn](https://scikit-learn.org/stable/)
-    - [h5py](https://www.h5py.org/)
-4. [tensorboardX](https://github.com/lanpa/tensorboardX)
+-   **Training Data:** The model is trained on the `train` split of pitts30k.
+-   **Evaluation Data:** Performance is measured on the `val` split, which is geographically separate from the training data to ensure a fair test of the model's generalization ability. The `val` set is composed of a **database** of known places and a set of **query** images to be localized.
 
-## Data
+---
 
-Running this code requires a copy of the Pittsburgh 250k (available [here](https://github.com/Relja/netvlad/issues/42)), 
-and the dataset specifications for the Pittsburgh dataset (available [here](https://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz)).
-`pittsburgh.py` contains a hardcoded path to a directory, where the code expects directories `000` to `010` with the various Pittsburth database images, a directory
-`queries_real` with subdirectories `000` to `010` with the query images, and a directory `datasets` with the dataset specifications (.mat files).
+## Getting Started
 
+Follow these instructions to set up the project and reproduce the results.
 
-# Usage
+### 1. Prerequisites
 
-`main.py` contains the majority of the code, and has three different modes (`train`, `test`, `cluster`) which we'll discuss in mode detail below.
+A Python environment with the following libraries is required. Using a virtual environment is highly recommended.
 
-## Train
+-   PyTorch
+-   Faiss (`faiss-gpu` is recommended)
+-   NumPy
+-   scikit-learn
+-   h5py
+-   TensorBoardX
+-   Matplotlib
 
-In order to initialise the NetVlad layer it is necessary to first run `main.py` with the correct settings and `--mode=cluster`. After which a model can be trained using (the following default flags):
+You can install all dependencies with pip:
+```bash
+pip install torch torchvision faiss-gpu tensorboardX h5py matplotlib scikit-learn
+```
 
-    python main.py --mode=train --arch=vgg16 --pooling=netvlad --num_clusters=64
+### 2. Data Setup
 
-The commandline args, the tensorboard data, and the model state will all be saved to `opt.runsPath`, which subsequently can be used for testing, or to resuming training.
+This project requires the Pittsburgh 250k image dataset and the pitts30k specification files.
 
-For more information on all commandline arguments run:
+1.  **Download Images:** The Pittsburgh 250k image database can be downloaded from [here](https://data.deepai.org/pittsburgh.zip) (~85 GB).
+2.  **Download Specifications:** The `.mat` files for the pitts30k train/val/test splits are available [here](https://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz).
 
-    python main.py --help
+After downloading and unzipping, place the image folders (`000`-`010`, `queries_real`) and the `datasets` folder in the root of this project directory.
 
-## Test
+### 3. Code Preparation
 
-To test a previously trained model on the Pittsburgh 30k testset (replace directory with correct dir for your case):
+Before running, execute the following commands from the project root to apply necessary patches.
 
-    python main.py --mode=test --resume=runsPath/Nov19_12-00-00_vgg16_netvlad --split=test
+```bash
+# Fix the hardcoded data path to use the current directory
+sed -i 's|root_dir = .*|root_dir = "./"|' pittsburgh.py
 
-The commandline arguments for training were saved, so we shouldnt need to specify them for testing.
-Additionally, to obtain the 'off the shelf' performance we can also omit the resume directory:
+# Ensure the model is correctly moved to the GPU for training
+sed -i "s/model = nn.DataParallel(model)/model = nn.DataParallel(model).to(device)/" main.py
 
-    python main.py --mode=test
+# Create the directory for saving model checkpoints
+mkdir -p checkpoints
+```
 
-## Cluster
+---
 
-In order to initialise the NetVlad layer we need to first sample from the data and obtain `opt.num_clusters` centroids. This step is
-necessary for each configuration of the network and for each dataset. To cluster simply run
+## Usage: Training and Evaluation
 
-    python main.py --mode=cluster --arch=vgg16 --pooling=netvlad --num_clusters=64
+This repository is configured to train and test two different CNN backbones.
 
-with the correct values for any additional commandline arguments.
+### AlexNet Pipeline (Train from Scratch)
+
+```bash
+# 1. Generate AlexNet Centroids
+python main.py --mode=cluster --arch=alexnet --num_clusters=64
+
+# 2. Train AlexNet
+python main.py --mode=train --arch=alexnet --num_clusters=64 --nEpochs=5 --batchSize=8
+
+# 3. Test AlexNet
+# NOTE: Replace 'path/to/alexnet/run' with the run path from the training output.
+python main.py --mode=test --arch=alexnet --split=val --resume path/to/alexnet/run/
+```
+
+### VGG16 Pipeline (Train from Scratch)
+
+Note the smaller batch size due to the higher memory requirements of VGG16.
+
+```bash
+# 1. Generate VGG16 Centroids
+python main.py --mode=cluster --arch=vgg16 --num_clusters=64
+
+# 2. Train VGG16
+python main.py --mode=train --arch=vgg16 --num_clusters=64 --nEpochs=5 --batchSize=4 --cacheBatchSize=8
+
+# 3. Test VGG16
+# NOTE: Replace 'path/to/vgg16/run' with the run path from the training output.
+python main.py --mode=test --arch=vgg16 --split=val --resume path/to/vgg16/run/
+```
+
+### Visualizing Results
+
+Use the included `generate_plots.py` script to create a bar chart comparing the performance of the two models.
+
+```bash
+# --- EXAMPLE PLOTTING COMMAND ---
+# Replace the recall values with the actual numbers from your test outputs.
+
+python generate_plots.py \
+    --alexnet_recalls <R@1> <R@5> <R@10> <R@20> \
+    --vgg16_recalls <R@1> <R@5> <R@10> <R@20>
+```
