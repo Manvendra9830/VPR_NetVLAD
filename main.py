@@ -48,7 +48,7 @@ parser.add_argument('--dataPath', type=str, default='/nfs/ibrahimi/data/', help=
 parser.add_argument('--runsPath', type=str, default='/nfs/ibrahimi/runs/', help='Path to save runs to.')
 parser.add_argument('--savePath', type=str, default='checkpoints', 
         help='Path to save checkpoints to in logdir. Default=checkpoints/')
-parser.add_argument('--cachePath', type=str, default=environ['TMPDIR'], help='Path to save cache to.')
+parser.add_argument('--cachePath', type=str, default=join(realpath(dirname(__file__)), 'cache'), help='Path to save cache to.')
 parser.add_argument('--resume', type=str, default='', help='Path to load checkpoint from, for resuming training or testing.')
 parser.add_argument('--ckpt', type=str, default='latest', 
         help='Resume from latest or best checkpoint.', choices=['latest', 'best'])
@@ -106,12 +106,14 @@ def train(epoch):
                     batch_size=opt.batchSize, shuffle=True, 
                     collate_fn=dataset.collate_fn, pin_memory=cuda)
 
-        print('Allocated:', torch.cuda.memory_allocated())
-        print('Cached:', torch.cuda.memory_cached())
+        if torch.cuda.is_available():
+            print('Allocated:', torch.cuda.memory_allocated())
+            print('Cached:', torch.cuda.memory_cached())
 
         model.train()
+        from tqdm import tqdm
         for iteration, (query, positives, negatives, 
-                negCounts, indices) in enumerate(training_data_loader, startIter):
+                negCounts, indices) in enumerate(tqdm(training_data_loader, desc=f"Epoch {epoch}"), startIter):
             # some reshaping to put query, pos, negs in a single (N, 3, H, W) tensor
             # where N = batchSize * (nQuery + nPos + nNeg)
             if query is None: continue # in case we get an empty batch
@@ -153,13 +155,15 @@ def train(epoch):
                         ((epoch-1) * nBatches) + iteration)
                 writer.add_scalar('Train/nNeg', nNeg, 
                         ((epoch-1) * nBatches) + iteration)
-                print('Allocated:', torch.cuda.memory_allocated())
-                print('Cached:', torch.cuda.memory_cached())
+                if torch.cuda.is_available():
+                    print('Allocated:', torch.cuda.memory_allocated())
+                    print('Cached:', torch.cuda.memory_cached())
 
         startIter += len(training_data_loader)
         del training_data_loader, loss
         optimizer.zero_grad()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         remove(train_set.cache) # delete HDF5 cache
 
     avg_loss = epoch_loss / nBatches
@@ -329,15 +333,15 @@ if __name__ == "__main__":
         raise Exception('Unknown dataset')
 
     cuda = not opt.nocuda
-    if cuda and not torch.cuda.is_available():
-        raise Exception("No GPU found, please run with --nocuda")
-
-    device = torch.device("cuda" if cuda else "cpu")
+    if cuda and torch.cuda.is_available():
+        device = torch.device('cuda:0')
+    else:
+        device = torch.device('cpu')
 
     random.seed(opt.seed)
     np.random.seed(opt.seed)
     torch.manual_seed(opt.seed)
-    if cuda:
+    if cuda and torch.cuda.is_available():
         torch.cuda.manual_seed(opt.seed)
 
     print('===> Loading dataset(s)')
@@ -490,12 +494,13 @@ if __name__ == "__main__":
         get_clusters(whole_train_set)
     elif opt.mode.lower() == 'train':
         print('===> Training model')
-        writer = SummaryWriter(log_dir=join(opt.runsPath, datetime.now().strftime('%b%d_%H-%M-%S')+'_'+opt.arch+'_'+opt.pooling))
-
-        # write checkpoints in logdir
-        logdir = writer.file_writer.get_logdir()
-        opt.savePath = join(logdir, opt.savePath)
-        if not opt.resume:
+        if opt.resume:
+            logdir = opt.resume
+            writer = SummaryWriter(log_dir=logdir)
+        else:
+            logdir = join(opt.runsPath, datetime.now().strftime('%b%d_%H-%M-%S')+'_'+opt.arch+'_'+opt.pooling)
+            writer = SummaryWriter(log_dir=logdir)
+            opt.savePath = join(logdir, opt.savePath)
             makedirs(opt.savePath)
 
         with open(join(opt.savePath, 'flags.json'), 'w') as f:
