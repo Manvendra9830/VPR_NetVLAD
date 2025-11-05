@@ -42,25 +42,25 @@ A Python environment with the following libraries is required. Using a virtual e
 -   h5py
 -   TensorBoardX
 -   Matplotlib
+-   gdown (for downloading the pre-trained model)
 
 You can install all dependencies with pip:
 ```bash
-pip install torch torchvision faiss-gpu tensorboardX h5py matplotlib scikit-learn
+pip install torch torchvision faiss-gpu tensorboardX h5py matplotlib scikit-learn gdown
 ```
 
 ### 2. Data and Pre-trained Model Setup
 
 This project requires the Pittsburgh image dataset, the pitts30k specification files, and the pre-trained VGG16 model checkpoint.
 
-1.  **Download Images:** The Pittsburgh 250k image database(~85 GB) can be downloaded from kaggle or from the original source.
+1.  **Download Images:** The Pittsburgh 250k image database can be downloaded from [here](https://data.deepai.org/pittsburgh.zip) (~85 GB).
 2.  **Download Specifications:** The `.mat` files for the pitts30k train/val/test splits are available [here](https://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz).
-3.  **Download Pre-trained VGG16 Model:** Download the `vgg16_netvlad_checkpoint.zip` file you have acquired.
 
-After downloading and unzipping, arrange your project directory so that the image folders (`000`-`010`, `queries_real`), the `datasets` folder, and the pre-trained model are in the correct locations.
+After downloading and unzipping, place the image folders (`000`-`010`, `queries_real`) and the `datasets` folder in the root of this project directory.
 
 ### 3. Code Preparation
 
-Before running, execute the following commands from the project root to apply necessary patches and place the VGG16 checkpoint correctly.
+Before running, execute the following commands from the project root to apply necessary patches and download the VGG16 checkpoint.
 
 ```bash
 # Fix the hardcoded data path to use the current directory
@@ -75,9 +75,10 @@ mkdir -p checkpoints
 # Create the directory structure for the pre-trained model
 mkdir -p pretrained_models/vgg16_netvlad_checkpoint/checkpoints/
 
-# Unzip and move the pre-trained model checkpoint
-# IMPORTANT: Replace 'path/to/your/vgg16_netvlad_checkpoint.zip' with the actual path to your downloaded zip file.
-unzip path/to/your/vgg16_netvlad_checkpoint.zip
+# Download and place the pre-trained VGG16 model from Google Drive
+# The gdown package is required for this command.
+gdown '1qd3eyDE9zGTmV6CEyHUlU2qD8MRw_N5l' -O vgg16_netvlad_checkpoint.zip
+unzip vgg16_netvlad_checkpoint.zip
 # This will likely extract a file like 'checkpoint.pth.tar'. Move it.
 mv checkpoint.pth.tar pretrained_models/vgg16_netvlad_checkpoint/checkpoints/
 ```
