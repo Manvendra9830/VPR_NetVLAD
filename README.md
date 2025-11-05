@@ -10,8 +10,8 @@ While based on an existing implementation, this project includes several key con
 
 -   **Code Portability:** Patched the source code to remove hardcoded paths and ensure it can run on any machine.
 -   **GPU Compatibility:** Corrected device placement issues to ensure the model properly utilizes an available GPU during training.
--   **Reproducible Pipelines:** Developed and documented clear, end-to-end pipelines for training and evaluating both `AlexNet` and `VGG16` architectures from scratch.
--   **Result Visualization:** Added a dedicated script (`generate_plots.py`) to compare the performance of different models, which was not present in the original repository.
+-   **Reproducible Pipelines:** Developed and documented clear, end-to-end pipelines for training `AlexNet` from scratch and evaluating a pre-trained `VGG16` model.
+-   **Result Visualization:** Added a dedicated script (`generate_plots.py`) to compare the performance of different models.
 -   **Dependency Management:** Modernized the dependency list and instructions for a smoother setup process.
 
 ## About The Project
@@ -48,35 +48,45 @@ You can install all dependencies with pip:
 pip install torch torchvision faiss-gpu tensorboardX h5py matplotlib scikit-learn
 ```
 
-### 2. Data Setup
+### 2. Data and Pre-trained Model Setup
 
-This project requires the Pittsburgh 250k image dataset and the pitts30k specification files.
+This project requires the Pittsburgh image dataset, the pitts30k specification files, and the pre-trained VGG16 model checkpoint.
 
 1.  **Download Images:** The Pittsburgh 250k image database can be downloaded from [here](https://data.deepai.org/pittsburgh.zip) (~85 GB).
 2.  **Download Specifications:** The `.mat` files for the pitts30k train/val/test splits are available [here](https://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz).
+3.  **Download Pre-trained VGG16 Model:** Download the `vgg16_netvlad_checkpoint.zip` file you have acquired.
 
-After downloading and unzipping, place the image folders (`000`-`010`, `queries_real`) and the `datasets` folder in the root of this project directory.
+After downloading and unzipping, arrange your project directory so that the image folders (`000`-`010`, `queries_real`), the `datasets` folder, and the pre-trained model are in the correct locations.
 
 ### 3. Code Preparation
 
-Before running, execute the following commands from the project root to apply necessary patches.
+Before running, execute the following commands from the project root to apply necessary patches and place the VGG16 checkpoint correctly.
 
 ```bash
 # Fix the hardcoded data path to use the current directory
 sed -i 's|root_dir = .*|root_dir = "./"|' pittsburgh.py
 
-# Ensure the model is correctly moved to the GPU for training
+# Ensure the model is correctly moved to the GPU for training/testing
 sed -i "s/model = nn.DataParallel(model)/model = nn.DataParallel(model).to(device)/" main.py
 
 # Create the directory for saving model checkpoints
 mkdir -p checkpoints
+
+# Create the directory structure for the pre-trained model
+mkdir -p pretrained_models/vgg16_netvlad_checkpoint/checkpoints/
+
+# Unzip and move the pre-trained model checkpoint
+# IMPORTANT: Replace 'path/to/your/vgg16_netvlad_checkpoint.zip' with the actual path to your downloaded zip file.
+unzip path/to/your/vgg16_netvlad_checkpoint.zip
+# This will likely extract a file like 'checkpoint.pth.tar'. Move it.
+mv checkpoint.pth.tar pretrained_models/vgg16_netvlad_checkpoint/checkpoints/
 ```
 
 ---
 
-## Usage: Training and Evaluation
+## Usage: Running the Pipelines
 
-This repository is configured to train and test two different CNN backbones.
+This repository is configured to train AlexNet and evaluate the pre-trained VGG16.
 
 ### AlexNet Pipeline (Train from Scratch)
 
@@ -92,25 +102,18 @@ python main.py --mode=train --arch=alexnet --num_clusters=64 --nEpochs=5 --batch
 python main.py --mode=test --arch=alexnet --split=val --resume path/to/alexnet/run/
 ```
 
-### VGG16 Pipeline (Train from Scratch)
+### VGG16 Pipeline (Evaluate Pre-trained Model)
 
-Note the smaller batch size due to the higher memory requirements of VGG16.
+This pipeline is much faster as it skips training and directly evaluates the high-performance, pre-trained VGG16 model.
 
 ```bash
-# 1. Generate VGG16 Centroids
-python main.py --mode=cluster --arch=vgg16 --num_clusters=64
-
-# 2. Train VGG16
-python main.py --mode=train --arch=vgg16 --num_clusters=64 --nEpochs=5 --batchSize=4 --cacheBatchSize=8
-
-# 3. Test VGG16
-# NOTE: Replace 'path/to/vgg16/run' with the run path from the training output.
-python main.py --mode=test --arch=vgg16 --split=val --resume path/to/vgg16/run/
+# 1. Test the pre-trained VGG16 model
+python main.py --mode=test --arch=vgg16 --split=val --resume pretrained_models/vgg16_netvlad_checkpoint/
 ```
 
 ### Visualizing Results
 
-Use the included `generate_plots.py` script to create a bar chart comparing the performance of the two models.
+Use the included `generate_plots.py` script to create a bar chart comparing the performance of the two models. After running the test commands for both pipelines, insert the resulting Recall@N scores into the command below.
 
 ```bash
 # --- EXAMPLE PLOTTING COMMAND ---
