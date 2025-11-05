@@ -4,16 +4,6 @@ This project implements and evaluates the NetVLAD architecture for the task of V
 
 *This work builds upon the PyTorch implementation by Nanne, available [here](https://github.com/Nanne/pytorch-NetVlad).*
 
-## My Contributions and Project Focus
-
-While based on an existing implementation, this project includes several key contributions and modifications to enable modern training and evaluation:
-
--   **Code Portability:** Patched the source code to remove hardcoded paths and ensure it can run on any machine.
--   **GPU Compatibility:** Corrected device placement issues to ensure the model properly utilizes an available GPU during training.
--   **Reproducible Pipelines:** Developed and documented clear, end-to-end pipelines for training and evaluating both `AlexNet` and `VGG16` architectures from scratch.
--   **Result Visualization:** Added a dedicated script (`generate_plots.py`) to compare the performance of different models, which was not present in the original repository.
--   **Dependency Management:** Modernized the dependency list and instructions for a smoother setup process.
-
 ## About The Project
 
 The goal of Visual Place Recognition is to identify a camera's geographical location by matching its current view against a database of geo-tagged images. This project uses NetVLAD, a powerful aggregation layer, to create a single, robust "global descriptor" vector for each image.
@@ -52,7 +42,7 @@ pip install torch torchvision faiss-gpu tensorboardX h5py matplotlib scikit-lear
 
 This project requires the Pittsburgh 250k image dataset and the pitts30k specification files.
 
-1.  **Download Images:** The Pittsburgh 250k image database can be downloaded from [here](https://data.deepai.org/pittsburgh.zip) (~85 GB).
+1.  **Download Images:** The Pittsburgh 250k image database(~85 GB) can be downloaded from kaggle or from the original source.
 2.  **Download Specifications:** The `.mat` files for the pitts30k train/val/test splits are available [here](https://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz).
 
 After downloading and unzipping, place the image folders (`000`-`010`, `queries_real`) and the `datasets` folder in the root of this project directory.
