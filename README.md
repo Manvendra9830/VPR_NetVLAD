@@ -48,7 +48,7 @@ pip install torch torchvision faiss-cpu scipy numpy sklearn h5py tensorboardX ma
 
 This project requires the **Pittsburgh 250k** image database and the **pitts30k** dataset specifications.
 
-1.  **Download Images:** The Pittsburgh 250k image database can be downloaded from a source like [Kaggle](https://www.kaggle.com/datasets/pittsburgh/pittsburgh-vpr-dataset) or [DeepAI](https://data.deepai.org/pittsburgh.zip) (~85 GB).
+1.  **Download Images:** The Pittsburgh 250k image database can be downloaded from a source like [Kaggle](https://www.kaggle.com/datasets/pittsburgh/pittsburgh-vpr-dataset)(~85 GB).
 2.  **Download Specifications:** The `.mat` files for the pitts30k train/val/test splits are available [here](https://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz).
 
 After downloading and unzipping, place the image folders (`000`-`010`, `queries_real`) and the `datasets` folder in the root of this project directory.
