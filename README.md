@@ -53,7 +53,7 @@ pip install torch torchvision faiss-gpu tensorboardX h5py matplotlib scikit-lear
 
 This project requires the Pittsburgh image dataset, the pitts30k specification files, and the pre-trained VGG16 model checkpoint.
 
-1.  **Download Images:** The Pittsburgh 250k image database can be downloaded from [here](https://data.deepai.org/pittsburgh.zip) (~85 GB).
+1.  **Download Images:** The Pittsburgh 250k (~85 GB) image database can be downloaded from kaggle.
 2.  **Download Specifications:** The `.mat` files for the pitts30k train/val/test splits are available [here](https://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz).
 
 After downloading and unzipping, place the image folders (`000`-`010`, `queries_real`) and the `datasets` folder in the root of this project directory.
