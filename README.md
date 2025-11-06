@@ -1,18 +1,22 @@
-# Visual Place Recognition using NetVLAD and CNN Backbones
 
-This project implements and evaluates the NetVLAD architecture for the task of Visual Place Recognition (VPR). It provides a complete pipeline for training and testing different CNN backbones on the standard Pittsburgh 30k benchmark dataset.
+# Visual Place Recognition using NetVLAD
+
+This project implements and evaluates the NetVLAD architecture for Visual Place Recognition (VPR). It provides pipelines for evaluating a pre-trained VGG16 model and training an AlexNet model from scratch on the Pittsburgh 30k benchmark.
 
 *This work builds upon the PyTorch implementation by Nanne, available [here](https://github.com/Nanne/pytorch-NetVlad).*
 
-## My Contributions and Project Focus
+## VGG16 Pre-Trained Model: Achieved Results
 
-While based on an existing implementation, this project includes several key contributions and modifications to enable modern training and evaluation:
+Using the Google Colab pipeline described below, the following "off-the-shelf" performance was achieved for the pre-trained VGG16 model on the `val` split of the pitts30k dataset.
 
--   **Code Portability:** Patched the source code to remove hardcoded paths and ensure it can run on any machine.
--   **GPU Compatibility:** Corrected device placement issues to ensure the model properly utilizes an available GPU during training.
--   **Reproducible Pipelines:** Developed and documented clear, end-to-end pipelines for training `AlexNet` from scratch and evaluating a pre-trained `VGG16` model.
--   **Result Visualization:** Added a dedicated script (`generate_plots.py`) to compare the performance of different models.
--   **Dependency Management:** Modernized the dependency list and instructions for a smoother setup process.
+| Metric    | Result |
+| :-------- | :----- |
+| Recall@1  | 0.6978 |
+| Recall@5  | 0.8509 |
+| Recall@10 | 0.8939 |
+| Recall@20 | 0.9280 |
+
+---
 
 ## About The Project
 
@@ -22,74 +26,89 @@ The goal of Visual Place Recognition is to identify a camera's geographical loca
 
 This project is configured to use the **Pittsburgh 30k (pitts30k)** dataset.
 
--   **Training Data:** The model is trained on the `train` split of pitts30k.
--   **Evaluation Data:** Performance is measured on the `val` split, which is geographically separate from the training data to ensure a fair test of the model's generalization ability. The `val` set is composed of a **database** of known places and a set of **query** images to be localized.
+-   **Training Data (`train` split):** Used during the `cluster` mode to generate the visual vocabulary (centroids).
+-   **Evaluation Data (`val` split):** Performance is measured on the `val` split, which is geographically separate from the training data to ensure a fair test of the model's generalization ability. The `val` set is composed of a **database** of known places and a set of **query** images to be localized.
 
 ---
 
-## Getting Started
+## VGG16 Pipeline (Recommended for Google Colab)
 
-Follow these instructions to set up the project and reproduce the results.
+This pipeline is the fastest way to get a strong baseline result. It skips training and directly evaluates the high-performance, pre-trained VGG16 model.
 
-### 1. Prerequisites
+### 1. Initial Setup on Google Drive
 
-A Python environment with the following libraries is required. Using a virtual environment is highly recommended.
+1.  Create a folder in your Google Drive (e.g., `My Drive/WSAI/Internship_project/`).
+2.  Upload the project source code as `pytorch-NetVlad.zip` to this folder.
+3.  Upload the pre-trained VGG16 model as `vgg16_netvlad_checkpoint.zip` to this folder.
 
--   PyTorch
--   Faiss (`faiss-gpu` is recommended)
--   NumPy
--   scikit-learn
--   h5py
--   TensorBoardX
--   Matplotlib
--   gdown (for downloading the pre-trained model)
+### 2. Colab Execution
 
-You can install all dependencies with pip:
-```bash
-pip install torch torchvision faiss-gpu tensorboardX h5py matplotlib scikit-learn gdown
+Create a new Google Colab notebook, connect to a GPU runtime, and run the following cells in order.
+
+**Cell 1: Mount Drive & Unzip Files**
+```python
+from google.colab import drive
+import os
+
+print("⚙️ Mounting Google Drive...")
+drive.mount('/content/drive')
+
+# --- Define Key Paths ---
+project_zip_path = "/content/drive/My Drive/WSAI/Internship_project/pytorch-NetVlad.zip"
+checkpoint_zip_path = "/content/drive/My Drive/WSAI/Internship_project/vgg16_netvlad_checkpoint.zip"
+
+print("\n⚙️ Unzipping project files...")
+!unzip -o "{project_zip_path}" -d /content/
+%cd /content/pytorch-NetVlad/
+
+print("\n⚙️ Unzipping VGG16 checkpoint...")
+checkpoint_dest = "/content/pytorch-NetVlad/pretrained_models/vgg16_netvlad_checkpoint/checkpoints/"
+os.makedirs(checkpoint_dest, exist_ok=True)
+!unzip -o "{checkpoint_zip_path}" -d "{checkpoint_dest}"
+
+print("\n✅ Project and checkpoint are ready.")
 ```
 
-### 2. Data and Pre-trained Model Setup
+**Cell 2: Install Dependencies & Apply Patches**
+```python
+import os
+print("⚙️ Installing dependencies and patching code...")
 
-This project requires the Pittsburgh image dataset, the pitts30k specification files, and the pre-trained VGG16 model checkpoint.
+# Install libraries
+!pip install -q torch torchvision faiss-cpu tensorboardX h5py matplotlib
 
-1.  **Download Images:** The Pittsburgh 250k image database can be downloaded from [here](https://data.deepai.org/pittsburgh.zip) (~85 GB).
-2.  **Download Specifications:** The `.mat` files for the pitts30k train/val/test splits are available [here](https://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz).
+# Create the 'checkpoints' directory to prevent a known bug
+os.makedirs("checkpoints", exist_ok=True)
 
-After downloading and unzipping, place the image folders (`000`-`010`, `queries_real`) and the `datasets` folder in the root of this project directory.
+# Patch pittsburgh.py to fix the dataset path
+!sed -i 's|root_dir = .*|root_dir = "/content/pytorch-NetVlad/"|' pittsburgh.py
 
-### 3. Code Preparation
+# Patch main.py to fix the GPU runtime error
+!sed -i "s/model = nn.DataParallel(model)/model = nn.DataParallel(model).to(device)/" main.py
 
-Before running, execute the following commands from the project root to apply necessary patches and download the VGG16 checkpoint.
+print("✅ Environment is fully prepared and patched.")
+```
 
-```bash
-# Fix the hardcoded data path to use the current directory
-sed -i 's|root_dir = .*|root_dir = "./"|' pittsburgh.py
+**Cell 3: Generate VGG16 Centroids**
+```python
+print(f"\n{'='*20} Starting: VGG16 CENTROID GENERATION {'='*20}")
+!python main.py --mode=cluster --arch=vgg16 --num_clusters=64
+print("✅ VGG16 Centroid Generation Complete.")
+```
 
-# Ensure the model is correctly moved to the GPU for training/testing
-sed -i "s/model = nn.DataParallel(model)/model = nn.DataParallel(model).to(device)/" main.py
-
-# Create the directory for saving model checkpoints
-mkdir -p checkpoints
-
-# Create the directory structure for the pre-trained model
-mkdir -p pretrained_models/vgg16_netvlad_checkpoint/checkpoints/
-
-# Download and place the pre-trained VGG16 model from Google Drive
-# The gdown package is required for this command.
-gdown '1qd3eyDE9zGTmV6CEyHUlU2qD8MRw_N5l' -O vgg16_netvlad_checkpoint.zip
-unzip vgg16_netvlad_checkpoint.zip
-# This will likely extract a file like 'checkpoint.pth.tar'. Move it.
-mv checkpoint.pth.tar pretrained_models/vgg16_netvlad_checkpoint/checkpoints/
+**Cell 4: Run VGG16 Evaluation**
+```python
+print(f"\n{'='*20} Starting: VGG16 TESTING {'='*20}")
+# The --threads=0 flag is crucial for memory efficiency on Colab
+!python main.py --mode=test --arch=vgg16 --split=val --threads=0
+print("\n✅ Testing complete.")
 ```
 
 ---
 
-## Usage: Running the Pipelines
+## AlexNet Pipeline (For Future Work)
 
-This repository is configured to train AlexNet and evaluate the pre-trained VGG16.
-
-### AlexNet Pipeline (Train from Scratch)
+This pipeline trains the smaller AlexNet model from scratch. It is more time-consuming but useful for understanding the full training process.
 
 ```bash
 # 1. Generate AlexNet Centroids
@@ -101,26 +120,4 @@ python main.py --mode=train --arch=alexnet --num_clusters=64 --nEpochs=5 --batch
 # 3. Test AlexNet
 # NOTE: Replace 'path/to/alexnet/run' with the run path from the training output.
 python main.py --mode=test --arch=alexnet --split=val --resume path/to/alexnet/run/
-```
-
-### VGG16 Pipeline (Evaluate Pre-trained Model)
-
-This pipeline is much faster as it skips training and directly evaluates the high-performance, pre-trained VGG16 model.
-
-```bash
-# 1. Test the pre-trained VGG16 model
-python main.py --mode=test --arch=vgg16 --split=val --resume pretrained_models/vgg16_netvlad_checkpoint/
-```
-
-### Visualizing Results
-
-Use the included `generate_plots.py` script to create a bar chart comparing the performance of the two models. After running the test commands for both pipelines, insert the resulting Recall@N scores into the command below.
-
-```bash
-# --- EXAMPLE PLOTTING COMMAND ---
-# Replace the recall values with the actual numbers from your test outputs.
-
-python generate_plots.py \
-    --alexnet_recalls <R@1> <R@5> <R@10> <R@20> \
-    --vgg16_recalls <R@1> <R@5> <R@10> <R@20>
 ```
