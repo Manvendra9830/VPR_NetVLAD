@@ -93,4 +93,4 @@ python main.py --mode=test --split=val --resume=<path_to_your_run>/
 python main.py --mode=test --arch=vgg16 --split=val
 ```
 
-**Note on Reproducing VGG16 Results on Google Colab:** For a complete, step-by-step guide to reproduce the VGG16 results, please use the notebook file `vgg16_pretrained_Netvlad_implemenation.ipynb`. This notebook is designed for the Colab environment and requires the pre-trained weights, which can be downloaded from the link provided within the notebook.
+**Note on Reproducing VGG16 Results on Google Colab:** For a complete, step-by-step guide to reproduce the VGG16 results, please use the notebook file `vgg16_pretrained_Netvlad_implemenation.ipynb`. This notebook is designed for the Colab environment and requires the pre-trained weights, which can be downloaded from the link provided [here](https://drive.google.com/file/d/17lKHxuxJxtODONW8aciNNT4r__u9UBRJ/view?usp=sharing)
