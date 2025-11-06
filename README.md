@@ -1,4 +1,3 @@
-
 # Visual Place Recognition using NetVLAD
 
 This project implements and evaluates the NetVLAD architecture for Visual Place Recognition (VPR). It provides pipelines for evaluating a pre-trained VGG16 model and training an AlexNet model from scratch on the Pittsburgh 30k benchmark.
