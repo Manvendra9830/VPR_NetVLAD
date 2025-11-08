@@ -529,6 +529,11 @@ if __name__ == "__main__":
         
         print('===> Running evaluation step')
         recalls = test(whole_test_set, epoch=0, write_tboard=False)
+
+    elif opt.mode == 'cluster':
+        print('===> Clustering')
+        whole_train_set = dataset.get_whole_training_set(onlyDB=True)
+        get_clusters(whole_train_set)
         
     elif opt.mode == 'prune':
         print('===> Pruning model')
