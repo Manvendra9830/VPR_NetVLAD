@@ -9,6 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import pruning # Import pruning functions
+import os
+import time # For naming pruned models
 from torch.autograd import Variable
 from torch.utils.data import DataLoader, SubsetRandomSampler
 from torch.utils.data.dataset import Subset
@@ -24,8 +27,10 @@ from tensorboardX import SummaryWriter
 import numpy as np
 import netvlad
 
+encoder_dim = 512
+
 parser = argparse.ArgumentParser(description='pytorch-NetVlad')
-parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster'])
+parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster', 'prune'])
 parser.add_argument('--batchSize', type=int, default=4, 
         help='Number of triplets (query, pos, negs). Each triplet consists of 12 images.')
 parser.add_argument('--cacheBatchSize', type=int, default=24, help='Batch size for caching and testing')
@@ -42,7 +47,7 @@ parser.add_argument('--lrGamma', type=float, default=0.5, help='Multiply LR by G
 parser.add_argument('--weightDecay', type=float, default=0.001, help='Weight decay for SGD.')
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum for SGD.')
 parser.add_argument('--nocuda', action='store_true', help='Dont use cuda')
-parser.add_argument('--threads', type=int, default=8, help='Number of threads for each data loader to use')
+parser.add_argument('--threads', type=int, default=8, help='Number of threads for each data loader to use') 
 parser.add_argument('--seed', type=int, default=123, help='Random seed to use.')
 parser.add_argument('--dataPath', type=str, default='/nfs/ibrahimi/data/', help='Path for centroid data.')
 parser.add_argument('--runsPath', type=str, default='/nfs/ibrahimi/runs/', help='Path to save runs to.')
@@ -67,6 +72,8 @@ parser.add_argument('--margin', type=float, default=0.1, help='Margin for triple
 parser.add_argument('--split', type=str, default='val', help='Data split to use for testing. Default is val', 
         choices=['test', 'test250k', 'train', 'val'])
 parser.add_argument('--fromscratch', action='store_true', help='Train from scratch rather than using pretrained models')
+parser.add_argument('--pruning_type', type=str, default=None, choices=['unstructured', 'structured'], help='Type of pruning to apply (unstructured or structured)')
+parser.add_argument('--pruning_amount', type=float, default=0.1, help='Percentage of weights to prune (e.g., 0.1 for 10%)')
 
 def train(epoch):
     epoch_loss = 0
@@ -298,6 +305,74 @@ class L2Norm(nn.Module):
     def forward(self, input):
         return F.normalize(input, p=2, dim=self.dim)
 
+def get_model(opt, device):
+    pretrained = not opt.fromscratch
+    if opt.arch.lower() == 'alexnet':
+        encoder = models.alexnet(pretrained=pretrained)
+        # capture only features and remove last relu and maxpool
+        layers = list(encoder.features.children())[:-2]
+
+        if pretrained:
+            # if using pretrained only train conv5
+            for l in layers[:-1]:
+                for p in l.parameters():
+                    p.requires_grad = False
+
+    elif opt.arch.lower() == 'vgg16':
+        encoder = models.vgg16(pretrained=pretrained)
+        # capture only feature part and remove last relu and maxpool
+        layers = list(encoder.features.children())[:-2]
+
+        if pretrained:
+            # if using pretrained then only train conv5_1, conv5_2, and conv5_3
+            for l in layers[:-5]: 
+                for p in l.parameters():
+                    p.requires_grad = False
+
+    if opt.mode.lower() == 'cluster' and not opt.vladv2:
+        layers.append(L2Norm())
+
+    encoder = nn.Sequential(*layers)
+    model = nn.Module() 
+    model.add_module('encoder', encoder)
+
+    if opt.mode.lower() != 'cluster':
+        if opt.pooling.lower() == 'netvlad':
+            net_vlad = netvlad.NetVLAD(num_clusters=opt.num_clusters, dim=encoder_dim, vladv2=opt.vladv2)
+            if not opt.resume: 
+                if opt.mode.lower() == 'train':
+                    initcache = join(opt.dataPath, 'centroids', opt.arch + '_' + opt.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
+                else:
+                    initcache = join(opt.dataPath, 'centroids', opt.arch + '_' + opt.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
+
+                if not exists(initcache):
+                    raise FileNotFoundError('Could not find clusters, please run with --mode=cluster before proceeding')
+
+                with h5py.File(initcache, mode='r') as h5: 
+                    clsts = h5.get("centroids")[...]
+                    traindescs = h5.get("descriptors")[...]
+                    net_vlad.init_params(clsts, traindescs) 
+                    del clsts, traindescs
+
+            model.add_module('pool', net_vlad)
+        elif opt.pooling.lower() == 'max':
+            global_pool = nn.AdaptiveMaxPool2d((1,1))
+            model.add_module('pool', nn.Sequential(*[global_pool, Flatten(), L2Norm()]))
+        elif opt.pooling.lower() == 'avg':
+            global_pool = nn.AdaptiveAvgPool2d((1,1))
+            model.add_module('pool', nn.Sequential(*[global_pool, Flatten(), L2Norm()]))
+        else:
+            raise ValueError('Unknown pooling type: ' + opt.pooling)
+    
+    model = model.to(device)
+    
+    if opt.nGPU > 1 and torch.cuda.device_count() > 1:
+        model.encoder = nn.DataParallel(model.encoder)
+        if opt.mode.lower() != 'cluster':
+            model.pool = nn.DataParallel(model.pool)
+
+    return model
+
 if __name__ == "__main__":
     opt = parser.parse_args()
 
@@ -377,75 +452,7 @@ if __name__ == "__main__":
 
     print('===> Building model')
 
-    pretrained = not opt.fromscratch
-    if opt.arch.lower() == 'alexnet':
-        encoder_dim = 256
-        encoder = models.alexnet(pretrained=pretrained)
-        # capture only features and remove last relu and maxpool
-        layers = list(encoder.features.children())[:-2]
-
-        if pretrained:
-            # if using pretrained only train conv5
-            for l in layers[:-1]:
-                for p in l.parameters():
-                    p.requires_grad = False
-
-    elif opt.arch.lower() == 'vgg16':
-        encoder_dim = 512
-        encoder = models.vgg16(pretrained=pretrained)
-        # capture only feature part and remove last relu and maxpool
-        layers = list(encoder.features.children())[:-2]
-
-        if pretrained:
-            # if using pretrained then only train conv5_1, conv5_2, and conv5_3
-            for l in layers[:-5]: 
-                for p in l.parameters():
-                    p.requires_grad = False
-
-    if opt.mode.lower() == 'cluster' and not opt.vladv2:
-        layers.append(L2Norm())
-
-    encoder = nn.Sequential(*layers)
-    model = nn.Module() 
-    model.add_module('encoder', encoder)
-
-    if opt.mode.lower() != 'cluster':
-        if opt.pooling.lower() == 'netvlad':
-            net_vlad = netvlad.NetVLAD(num_clusters=opt.num_clusters, dim=encoder_dim, vladv2=opt.vladv2)
-            if not opt.resume: 
-                if opt.mode.lower() == 'train':
-                    initcache = join(opt.dataPath, 'centroids', opt.arch + '_' + train_set.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
-                else:
-                    initcache = join(opt.dataPath, 'centroids', opt.arch + '_' + whole_test_set.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
-
-                if not exists(initcache):
-                    raise FileNotFoundError('Could not find clusters, please run with --mode=cluster before proceeding')
-
-                with h5py.File(initcache, mode='r') as h5: 
-                    clsts = h5.get("centroids")[...]
-                    traindescs = h5.get("descriptors")[...]
-                    net_vlad.init_params(clsts, traindescs) 
-                    del clsts, traindescs
-
-            model.add_module('pool', net_vlad)
-        elif opt.pooling.lower() == 'max':
-            global_pool = nn.AdaptiveMaxPool2d((1,1))
-            model.add_module('pool', nn.Sequential(*[global_pool, Flatten(), L2Norm()]))
-        elif opt.pooling.lower() == 'avg':
-            global_pool = nn.AdaptiveAvgPool2d((1,1))
-            model.add_module('pool', nn.Sequential(*[global_pool, Flatten(), L2Norm()]))
-        else:
-            raise ValueError('Unknown pooling type: ' + opt.pooling)
-
-    isParallel = False
-    if opt.nGPU > 1 and torch.cuda.device_count() > 1:
-        model.encoder = nn.DataParallel(model.encoder)
-        if opt.mode.lower() != 'cluster':
-            model.pool = nn.DataParallel(model.pool)
-        isParallel = True
-
-    if not opt.resume:
-        model = model.to(device)
+    model = get_model(opt, device)
     
     if opt.mode.lower() == 'train':
         if opt.optim.upper() == 'ADAM':
@@ -485,57 +492,81 @@ if __name__ == "__main__":
         else:
             print("=> no checkpoint found at '{}'".format(resume_ckpt))
 
-    if opt.mode.lower() == 'test':
-        print('===> Running evaluation step')
-        epoch = 1
-        recalls = test(whole_test_set, epoch, write_tboard=False)
-    elif opt.mode.lower() == 'cluster':
-        print('===> Calculating descriptors and clusters')
-        get_clusters(whole_train_set)
-    elif opt.mode.lower() == 'train':
-        print('===> Training model')
+    if opt.mode == 'test':
+        print('===> Evaluating on val set')
+        whole_test_set = dataset.get_whole_val_set()
+        print('====> Query count:', whole_test_set.dbStruct.numQ)
+        
+        model = get_model(opt, device)
+        
         if opt.resume:
-            logdir = opt.resume
-            writer = SummaryWriter(log_dir=logdir)
-        else:
-            logdir = join(opt.runsPath, datetime.now().strftime('%b%d_%H-%M-%S')+'_'+opt.arch+'_'+opt.pooling)
-            writer = SummaryWriter(log_dir=logdir)
-            opt.savePath = join(logdir, opt.savePath)
-            makedirs(opt.savePath)
+            if opt.arch == 'vgg16': # For VGG16, we expect a specific checkpoint structure
+                if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
+                    raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
+                checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+            else: # For other architectures, assume direct checkpoint path
+                if not os.path.exists(join(opt.resume, 'checkpoint.pth.tar')):
+                    raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoint.pth.tar')}'")
+                checkpoint = torch.load(join(opt.resume, 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+            
+            model.load_state_dict(checkpoint['state_dict'])
+            print(f"=> loaded checkpoint '{opt.resume}' (epoch {checkpoint['epoch']})")
+        
+        print('===> Running evaluation step')
+        recalls = test(whole_test_set, epoch=0, write_tboard=False)
+        
+    elif opt.mode == 'prune':
+        print('===> Pruning model')
+        if not opt.resume:
+            raise ValueError("Pruning mode requires a --resume path to a trained model.")
+        if not opt.pruning_type:
+            raise ValueError("Pruning mode requires --pruning_type (unstructured or structured).")
+        
+        # Load the model
+        model = get_model(opt, device)
+        if opt.arch == 'vgg16': # For VGG16, we expect a specific checkpoint structure
+            if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
+                raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
+            checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+        else: # For other architectures, assume direct checkpoint path
+            if not os.path.exists(join(opt.resume, 'checkpoint.pth.tar')):
+                raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoint.pth.tar')}'")
+            checkpoint = torch.load(join(opt.resume, 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+        
+        model.load_state_dict(checkpoint['state_dict'])
+        print(f"=> loaded model from '{opt.resume}' for pruning")
+        
+        # Apply pruning
+        if opt.pruning_type == 'unstructured':
+            model = pruning.apply_unstructured_pruning(model, opt.arch, opt.pruning_amount)
+        elif opt.pruning_type == 'structured':
+            model = pruning.apply_structured_pruning(model, opt.arch, opt.pruning_amount)
+        
+        # Make pruning permanent
+        model = pruning.make_pruning_permanent(model)
+        
+        # Calculate and print sparsity
+        pruning.calculate_sparsity(model)
+        
+        # Save the pruned model
+        pruned_model_dir = f"{opt.resume}_pruned_{opt.pruning_type}_{int(opt.pruning_amount*100)}pct"
+        os.makedirs(pruned_model_dir, exist_ok=True)
+        
+        pruned_checkpoint_path = join(pruned_model_dir, 'checkpoint.pth.tar')
+        torch.save({
+            'epoch': checkpoint['epoch'],
+            'state_dict': model.state_dict(),
+            'best_score': checkpoint.get('best_score', 0), # Use .get for robustness
+            'optimizer': checkpoint['optimizer'] if 'optimizer' in checkpoint else None,
+            'pool_layer': checkpoint['pool_layer'] if 'pool_layer' in checkpoint else None,
+        }, pruned_checkpoint_path)
+        print(f"✅ Pruned model saved to: {pruned_checkpoint_path}")
+        
+        # Evaluate the pruned model
+        print('===> Evaluating pruned model')
+        whole_test_set = dataset.get_whole_val_set()
+        recalls = test(whole_test_set, epoch=0, write_tboard=False)
+        
+    else:
+        raise ValueError('Unknown mode: ' + opt.mode)
 
-        with open(join(opt.savePath, 'flags.json'), 'w') as f:
-            f.write(json.dumps(
-                {k:v for k,v in vars(opt).items()}
-                ))
-        print('===> Saving state to:', logdir)
-
-        not_improved = 0
-        best_score = 0
-        for epoch in range(opt.start_epoch+1, opt.nEpochs + 1):
-            if opt.optim.upper() == 'SGD':
-                scheduler.step(epoch)
-            train(epoch)
-            if (epoch % opt.evalEvery) == 0:
-                recalls = test(whole_test_set, epoch, write_tboard=True)
-                is_best = recalls[5] > best_score 
-                if is_best:
-                    not_improved = 0
-                    best_score = recalls[5]
-                else: 
-                    not_improved += 1
-
-                save_checkpoint({
-                        'epoch': epoch,
-                        'state_dict': model.state_dict(),
-                        'recalls': recalls,
-                        'best_score': best_score,
-                        'optimizer' : optimizer.state_dict(),
-                        'parallel' : isParallel,
-                }, is_best)
-
-                if opt.patience > 0 and not_improved > (opt.patience / opt.evalEvery):
-                    print('Performance did not improve for', opt.patience, 'epochs. Stopping.')
-                    break
-
-        print("=> Best Recall@5: {:.4f}".format(best_score), flush=True)
-        writer.close()

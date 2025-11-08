@@ -121,4 +121,27 @@ After running the final cell, the output will show the `Recall@N` scores, which 
 
 ## 4. Future Work: Optimization and Compression
 
-After achieving these baseline results, the next phase of this project will involve optimizing and compressing the trained models. Techniques like **pruning** (removing unnecessary connections in the network) or **quantization** (using lower-precision numbers for model weights) will be explored. This allows for models that are faster and require less memory, making them suitable for deployment on resource-constrained devices, while aiming to retain competitive performance.
+---
+
+## 5. Model Optimization: Pruning
+
+After establishing a baseline, the next step is to make the model smaller and faster without losing too much accuracy. This is where **pruning** comes in.
+
+### What is Pruning?
+
+Imagine a neural network is like a dense bush with many interconnected branches (the model's weights). Pruning is the process of carefully trimming away the least important branches. The goal is to create a "sparser" network that is more efficient.
+
+-   **Sparsity**: This term refers to the percentage of model parameters (weights) that have been zeroed out or removed. A model with 90% sparsity is much smaller than the original.
+
+### How Does Pruning Affect NetVLAD?
+
+In our project, pruning is applied to the **VGG16 encoder**, which is the part of the model responsible for extracting local features from the image (the first step in building the global descriptor).
+
+By removing weights from the convolutional layers of VGG16, we reduce the model's overall size and the number of computations required for feature extraction. The key challenge is to do this without damaging the quality of the local features, which would harm the final global descriptor and reduce place recognition accuracy.
+
+This project supports two methods, which can be run using the `--mode=prune` command (see `README.md` for examples):
+
+1.  **Unstructured Pruning**: This removes individual weights. It's like snipping off single leaves from the bush. It creates high sparsity but doesn't always translate to a speed-up on standard hardware.
+2.  **Structured Pruning**: This removes entire groups of weights, like entire filters or channels in the convolutional layers. This is like cutting off whole branches from the bush. It has a direct impact on model size and speed.
+
+The `pruning.py` script contains the core logic for applying these techniques to the model. By testing the pruned model, we can measure the trade-off between model size and performance (Recall@N).

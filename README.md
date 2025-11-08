@@ -29,6 +29,31 @@ This stage will involve applying compression techniques to the trained models an
 | Pruned Model | (TBD) | (TBD) | (TBD) | (TBD) | (TBD) |
 | Quantized Model | (TBD) | (TBD) | (TBD) | (TBD) | (TBD) |
 
+### 4. `prune` Mode (Model Optimization)
+
+This mode applies model pruning to a trained model to reduce its size and potentially improve inference speed. This is a key part of model optimization. The script supports two types of pruning:
+
+-   **Unstructured Pruning**: Removes individual weights from the model. This is more flexible but may not always result in a smaller model file or faster inference without specialized hardware.
+-   **Structured Pruning**: Removes entire channels or filters from the model. This directly results in a smaller and faster model.
+
+After pruning, the script automatically evaluates the pruned model's performance.
+
+**Example Commands:**
+
+```bash
+# To apply 10% unstructured pruning to the VGG16 model
+python main.py --mode=prune --arch=vgg16 --pruning_type=unstructured --pruning_amount=0.1 --resume=<path_to_your_run>/
+
+# To apply 20% structured pruning to the VGG16 model
+python main.py --mode=prune --arch=vgg16 --pruning_type=structured --pruning_amount=0.2 --resume=<path_to_your_run>/
+```
+
+**Expected Output:**
+
+The script will save the pruned model checkpoint to a new directory within the resumed path, named `_pruned_<pruning_type>_<pruning_amount>pct`. For example:
+
+`<path_to_your_run>/_pruned_structured_20pct/checkpoint.pth.tar`
+
 ---
 
 ## Setup
