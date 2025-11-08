@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import pruning # Import pruning functions
+from quantisation import static_quantization, qat_quantization
 import os
 import time # For naming pruned models
 from torch.autograd import Variable
@@ -30,7 +31,7 @@ import netvlad
 encoder_dim = 512
 
 parser = argparse.ArgumentParser(description='pytorch-NetVlad')
-parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster', 'prune'])
+parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster', 'prune', 'quantize'])
 parser.add_argument('--batchSize', type=int, default=4, 
         help='Number of triplets (query, pos, negs). Each triplet consists of 12 images.')
 parser.add_argument('--cacheBatchSize', type=int, default=24, help='Batch size for caching and testing')
@@ -74,6 +75,7 @@ parser.add_argument('--split', type=str, default='val', help='Data split to use 
 parser.add_argument('--fromscratch', action='store_true', help='Train from scratch rather than using pretrained models')
 parser.add_argument('--pruning_type', type=str, default=None, choices=['unstructured', 'structured'], help='Type of pruning to apply (unstructured or structured)')
 parser.add_argument('--pruning_amount', type=float, default=0.1, help='Percentage of weights to prune (e.g., 0.1 for 10%)')
+parser.add_argument('--quantization_type', type=str, default=None, choices=['static', 'qat'], help='Type of quantization to apply (static or qat)')
 
 def train(epoch):
     epoch_loss = 0
@@ -102,10 +104,9 @@ def train(epoch):
             with torch.no_grad():
                 for iteration, (input, indices) in enumerate(whole_training_data_loader, 1):
                     input = input.to(device)
-                    image_encoding = model.encoder(input)
-                    vlad_encoding = model.pool(image_encoding) 
+                    vlad_encoding = model(input)
                     h5feat[indices.detach().numpy(), :] = vlad_encoding.detach().cpu().numpy()
-                    del input, image_encoding, vlad_encoding
+                    del input, vlad_encoding
 
         sub_train_set = Subset(dataset=train_set, indices=subsetIdx[subIter])
 
@@ -130,8 +131,7 @@ def train(epoch):
             input = torch.cat([query, positives, negatives])
 
             input = input.to(device)
-            image_encoding = model.encoder(input)
-            vlad_encoding = model.pool(image_encoding) 
+            vlad_encoding = model(input)
 
             vladQ, vladP, vladN = torch.split(vlad_encoding, [B, B, nNeg])
 
@@ -149,7 +149,7 @@ def train(epoch):
             loss /= nNeg.float().to(device) # normalise by actual number of negatives
             loss.backward()
             optimizer.step()
-            del input, image_encoding, vlad_encoding, vladQ, vladP, vladN
+            del input, vlad_encoding, vladQ, vladP, vladN
             del query, positives, negatives
 
             batch_loss = loss.item()
@@ -194,15 +194,14 @@ def test(eval_set, epoch=0, write_tboard=False):
 
         for iteration, (input, indices) in enumerate(test_data_loader, 1):
             input = input.to(device)
-            image_encoding = model.encoder(input)
-            vlad_encoding = model.pool(image_encoding) 
+            vlad_encoding = model(input)
 
             dbFeat[indices.detach().numpy(), :] = vlad_encoding.detach().cpu().numpy()
             if iteration % 50 == 0 or len(test_data_loader) <= 10:
                 print("==> Batch ({}/{})".format(iteration, 
                     len(test_data_loader)), flush=True)
 
-            del input, image_encoding, vlad_encoding
+            del input, vlad_encoding
     del test_data_loader
 
     # extracted for both db and query, now split in own sets
@@ -305,6 +304,21 @@ class L2Norm(nn.Module):
     def forward(self, input):
         return F.normalize(input, p=2, dim=self.dim)
 
+class VGGNetVLAD(nn.Module):
+    def __init__(self, encoder, pool):
+        super().__init__()
+        self.quant = torch.quantization.QuantStub()
+        self.encoder = encoder
+        self.pool = pool
+        self.dequant = torch.quantization.DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.encoder(x)
+        x = self.dequant(x)
+        x = self.pool(x)
+        return x
+
 def get_model(opt, device):
     pretrained = not opt.fromscratch
     if opt.arch.lower() == 'alexnet':
@@ -333,9 +347,9 @@ def get_model(opt, device):
         layers.append(L2Norm())
 
     encoder = nn.Sequential(*layers)
-    model = nn.Module() 
-    model.add_module('encoder', encoder)
-
+    
+    # The pooling layer depends on the mode
+    pool = None
     if opt.mode.lower() != 'cluster':
         if opt.pooling.lower() == 'netvlad':
             net_vlad = netvlad.NetVLAD(num_clusters=opt.num_clusters, dim=encoder_dim, vladv2=opt.vladv2)
@@ -353,20 +367,20 @@ def get_model(opt, device):
                     traindescs = h5.get("descriptors")[...]
                     net_vlad.init_params(clsts, traindescs) 
                     del clsts, traindescs
-
-            model.add_module('pool', net_vlad)
+            pool = net_vlad
         elif opt.pooling.lower() == 'max':
             global_pool = nn.AdaptiveMaxPool2d((1,1))
-            model.add_module('pool', nn.Sequential(*[global_pool, Flatten(), L2Norm()]))
+            pool = nn.Sequential(*[global_pool, Flatten(), L2Norm()])
         elif opt.pooling.lower() == 'avg':
             global_pool = nn.AdaptiveAvgPool2d((1,1))
-            model.add_module('pool', nn.Sequential(*[global_pool, Flatten(), L2Norm()]))
+            pool = nn.Sequential(*[global_pool, Flatten(), L2Norm()])
         else:
             raise ValueError('Unknown pooling type: ' + opt.pooling)
-    
+
+    model = VGGNetVLAD(encoder, pool)
     model = model.to(device)
     
-    if opt.nGPU > 1 and torch.cuda.device_count() > 1:
+    if cuda and opt.nGPU > 1 and torch.cuda.device_count() > 1:
         model.encoder = nn.DataParallel(model.encoder)
         if opt.mode.lower() != 'cluster':
             model.pool = nn.DataParallel(model.pool)
@@ -565,6 +579,54 @@ if __name__ == "__main__":
         # Evaluate the pruned model
         print('===> Evaluating pruned model')
         whole_test_set = dataset.get_whole_val_set()
+        recalls = test(whole_test_set, epoch=0, write_tboard=False)
+
+    elif opt.mode == 'quantize':
+        print('===> Quantizing model')
+        if not opt.resume:
+            raise ValueError("Quantization mode requires a --resume path to a trained model.")
+        if not opt.quantization_type:
+            raise ValueError("Quantization mode requires --quantization_type (static or qat).")
+
+        # Load the model
+        model = get_model(opt, device)
+        if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
+            raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
+        checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+        
+        model.load_state_dict(checkpoint['state_dict'])
+        print(f"=> loaded model from '{opt.resume}' for quantization")
+        
+        # Get the validation set for calibration/QAT
+        whole_test_set = dataset.get_whole_val_set()
+        # Create a DataLoader for the quantization functions
+        # Use a small batch size for calibration/QAT fine-tuning
+        quant_data_loader = DataLoader(dataset=whole_test_set, 
+                num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True, 
+                pin_memory=cuda)
+
+        # Apply quantization
+        if opt.quantization_type == 'static':
+            model = static_quantization(model, quant_data_loader)
+        elif opt.quantization_type == 'qat':
+            # QAT fine-tuning should be done on the training set, but for a quick test, we use the val set.
+            print("Warning: Using validation set for QAT fine-tuning. For best results, use the training set.")
+            model = qat_quantization(model, quant_data_loader, epochs=1)
+        
+        # Save the quantized model
+        quantized_model_dir = f"{opt.resume}_quantized_{opt.quantization_type}"
+        os.makedirs(quantized_model_dir, exist_ok=True)
+        
+        quantized_checkpoint_path = join(quantized_model_dir, 'checkpoint.pth.tar')
+        torch.save({
+            'epoch': checkpoint['epoch'],
+            'state_dict': model.state_dict(),
+            'best_score': checkpoint.get('best_score', 0),
+        }, quantized_checkpoint_path)
+        print(f"✅ Quantized model saved to: {quantized_checkpoint_path}")
+        
+        # Evaluate the quantized model
+        print('===> Evaluating quantized model')
         recalls = test(whole_test_set, epoch=0, write_tboard=False)
         
     else:
