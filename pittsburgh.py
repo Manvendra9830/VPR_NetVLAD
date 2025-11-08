@@ -12,12 +12,24 @@ from PIL import Image
 from sklearn.neighbors import NearestNeighbors
 import h5py
 
-root_dir = 'C:/Users/Manvendra Singh/Desktop/WSAI/Internship/pytorch-NetVlad/'
-if not exists(root_dir):
-    raise FileNotFoundError('root_dir is hardcoded, please adjust to point to Pittsburth dataset')
+# root_dir = 'C:/Users/Manvendra Singh/Desktop/WSAI/Internship/pytorch-NetVlad/'
+# if not exists(root_dir):
+#     raise FileNotFoundError('root_dir is hardcoded, please adjust to point to Pittsburth dataset')
 
-struct_dir = join(root_dir, 'datasets/')
-queries_dir = join(root_dir, 'queries_real')
+# struct_dir = join(root_dir, 'datasets/')
+# queries_dir = join(root_dir, 'queries_real')
+
+opt = None
+root_dir = None
+struct_dir = None
+queries_dir = None
+
+def init(opt_):
+    global opt, root_dir, struct_dir, queries_dir
+    opt = opt_
+    root_dir = opt.dataPath
+    struct_dir = join(root_dir, 'datasets')
+    queries_dir = join(root_dir, 'queries_real')
 
 def input_transform():
     return transforms.Compose([
