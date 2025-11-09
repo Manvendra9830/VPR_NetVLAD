@@ -441,8 +441,6 @@ if __name__ == "__main__":
     torch.manual_seed(opt.seed)
     if cuda and torch.cuda.is_available():
         torch.cuda.manual_seed(opt.seed)
-
-    global writer
     if opt.mode.lower() == 'train':
         writer = SummaryWriter(log_dir=join(opt.savePath, 'logs'))
 
