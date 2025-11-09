@@ -249,10 +249,10 @@ def get_clusters(cluster_set):
                 pin_memory=cuda,
                 sampler=sampler)
 
-    if not exists(join(opt.dataPath, 'centroids')):
-        makedirs(join(opt.dataPath, 'centroids'))
+    if not exists(join(opt.dataPath, 'data', 'centroids')):
+        makedirs(join(opt.dataPath, 'data', 'centroids'))
 
-    initcache = join(opt.dataPath, 'centroids', opt.arch + '_' + cluster_set.dataset + '_' + str(opt.num_clusters) + '_desc_cen.hdf5')
+    initcache = join(opt.dataPath, 'data', 'centroids', opt.arch + '_' + opt.dataset + '_' + str(opt.num_clusters) + '_desc_cen.hdf5')
     with h5py.File(initcache, mode='w') as h5: 
         with torch.no_grad():
             model.eval()
@@ -320,11 +320,13 @@ class VGGNetVLAD(nn.Module):
         return x
 
 def get_model(opt, device):
+    global encoder_dim # Declare encoder_dim as global to modify it
     pretrained = not opt.fromscratch
     if opt.arch.lower() == 'alexnet':
         encoder = models.alexnet(pretrained=pretrained)
         # capture only features and remove last relu and maxpool
         layers = list(encoder.features.children())[:-2]
+        encoder_dim = 256 # AlexNet's feature dimension
 
         if pretrained:
             # if using pretrained only train conv5
@@ -336,6 +338,7 @@ def get_model(opt, device):
         encoder = models.vgg16(pretrained=pretrained)
         # capture only feature part and remove last relu and maxpool
         layers = list(encoder.features.children())[:-2]
+        encoder_dim = 512 # VGG16's feature dimension
 
         if pretrained:
             # if using pretrained then only train conv5_1, conv5_2, and conv5_3
@@ -355,9 +358,9 @@ def get_model(opt, device):
             net_vlad = netvlad.NetVLAD(num_clusters=opt.num_clusters, dim=encoder_dim, vladv2=opt.vladv2)
             if not opt.resume: 
                 if opt.mode.lower() == 'train':
-                    initcache = join(opt.dataPath, 'centroids', opt.arch + '_' + opt.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
+                    initcache = join(opt.dataPath, 'data', 'centroids', opt.arch + '_' + opt.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
                 else:
-                    initcache = join(opt.dataPath, 'centroids', opt.arch + '_' + opt.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
+                    initcache = join(opt.dataPath, 'data', 'centroids', opt.arch + '_' + opt.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
 
                 if not exists(initcache):
                     raise FileNotFoundError('Could not find clusters, please run with --mode=cluster before proceeding')
@@ -416,6 +419,9 @@ if __name__ == "__main__":
 
     print(opt)
 
+    if not exists(opt.cachePath):
+        makedirs(opt.cachePath)
+
     if opt.dataset.lower() == 'pittsburgh':
         import pittsburgh as dataset
         dataset.init(opt)
@@ -436,6 +442,17 @@ if __name__ == "__main__":
 
     print('===> Loading dataset(s)')
     if opt.mode.lower() == 'train':
+        # Dynamically set savePath for new training runs to mirror pretrained structure
+        if not opt.resume:
+            run_dir_name = f"{opt.arch}_netvlad_checkpoint"
+            opt.savePath = join(run_dir_name, run_dir_name, 'checkpoints')
+            if not exists(opt.savePath):
+                makedirs(opt.savePath)
+            # Save flags to the parent directory of checkpoints
+            with open(join(run_dir_name, run_dir_name, 'flags.json'), 'w') as f:
+                json.dump({k:v for k,v in vars(opt).items()}, f, indent=4, sort_keys=True)
+            print(f"Training checkpoints will be saved to: {opt.savePath}")
+
         whole_train_set = dataset.get_whole_training_set()
         whole_training_data_loader = DataLoader(dataset=whole_train_set, 
                 num_workers=opt.threads, batch_size=opt.cacheBatchSize, shuffle=False, 
@@ -515,14 +532,10 @@ if __name__ == "__main__":
         model = get_model(opt, device)
         
         if opt.resume:
-            if opt.arch == 'vgg16': # For VGG16, we expect a specific checkpoint structure
-                if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
-                    raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
-                checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
-            else: # For other architectures, assume direct checkpoint path
-                if not os.path.exists(join(opt.resume, 'checkpoint.pth.tar')):
-                    raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoint.pth.tar')}'")
-                checkpoint = torch.load(join(opt.resume, 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+            # All architectures now expect the checkpoint in the 'checkpoints' subdirectory
+            if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
+                raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
+            checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
             
             model.load_state_dict(checkpoint['state_dict'])
             print(f"=> loaded checkpoint '{opt.resume}' (epoch {checkpoint['epoch']})")
@@ -535,6 +548,22 @@ if __name__ == "__main__":
         whole_train_set = dataset.get_whole_training_set(onlyDB=True)
         get_clusters(whole_train_set)
         
+    elif opt.mode == 'train':
+        print('===> Training')
+        for epoch in range(opt.start_epoch, opt.nEpochs + 1):
+            train(epoch)
+            if (epoch % opt.evalEvery) == 0:
+                recalls = test(whole_test_set, epoch, write_tboard=True)
+                is_best = recalls[1] > best_metric
+                best_metric = max(is_best, recalls[1])
+                save_checkpoint({ 
+                    'epoch': epoch + 1,
+                    'state_dict': model.state_dict(),
+                    'best_score': best_metric,
+                    'optimizer' : optimizer.state_dict(),
+                    'pool_layer': model.pool.state_dict()
+                }, is_best)
+        
     elif opt.mode == 'prune':
         print('===> Pruning model')
         if not opt.resume:
@@ -544,14 +573,10 @@ if __name__ == "__main__":
         
         # Load the model
         model = get_model(opt, device)
-        if opt.arch == 'vgg16': # For VGG16, we expect a specific checkpoint structure
-            if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
-                raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
-            checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
-        else: # For other architectures, assume direct checkpoint path
-            if not os.path.exists(join(opt.resume, 'checkpoint.pth.tar')):
-                raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoint.pth.tar')}'")
-            checkpoint = torch.load(join(opt.resume, 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+        # All architectures now expect the checkpoint in the 'checkpoints' subdirectory
+        if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
+            raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
+        checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
         
         model.load_state_dict(checkpoint['state_dict'])
         print(f"=> loaded model from '{opt.resume}' for pruning")
@@ -596,6 +621,7 @@ if __name__ == "__main__":
 
         # Load the model
         model = get_model(opt, device)
+        # All architectures now expect the checkpoint in the 'checkpoints' subdirectory
         if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
             raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
         checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
