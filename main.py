@@ -392,6 +392,7 @@ def get_model(opt, device):
     return model
 
 if __name__ == "__main__":
+    global writer
     opt = parser.parse_args()
 
     restore_var = ['lr', 'lrStep', 'lrGamma', 'weightDecay', 'momentum', 
