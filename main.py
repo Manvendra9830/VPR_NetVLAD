@@ -29,6 +29,7 @@ import numpy as np
 import netvlad
 
 encoder_dim = 512
+writer = None
 
 parser = argparse.ArgumentParser(description='pytorch-NetVlad')
 parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster', 'prune', 'quantize'])
@@ -439,6 +440,10 @@ if __name__ == "__main__":
     torch.manual_seed(opt.seed)
     if cuda and torch.cuda.is_available():
         torch.cuda.manual_seed(opt.seed)
+
+    global writer
+    if opt.mode.lower() == 'train':
+        writer = SummaryWriter(log_dir=join(opt.savePath, 'logs'))
 
     print('===> Loading dataset(s)')
     if opt.mode.lower() == 'train':
