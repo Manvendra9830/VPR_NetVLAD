@@ -516,7 +516,7 @@ if __name__ == "__main__":
 
         if isfile(resume_ckpt):
             print("=> loading checkpoint '{}'".format(resume_ckpt))
-            checkpoint = torch.load(resume_ckpt, map_location=lambda storage, loc: storage)
+            checkpoint = torch.load(resume_ckpt, map_location=lambda storage, loc: storage, weights_only=False)
             opt.start_epoch = checkpoint['epoch']
             best_metric = checkpoint['best_score']
             model.load_state_dict(checkpoint['state_dict'])
@@ -539,7 +539,7 @@ if __name__ == "__main__":
             # All architectures now expect the checkpoint in the 'checkpoints' subdirectory
             if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
                 raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
-            checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+            checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage, weights_only=False)
             
             model.load_state_dict(checkpoint['state_dict'])
             print(f"=> loaded checkpoint '{opt.resume}' (epoch {checkpoint['epoch']})")
@@ -581,7 +581,7 @@ if __name__ == "__main__":
         # All architectures now expect the checkpoint in the 'checkpoints' subdirectory
         if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
             raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
-        checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+        checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage, weights_only=False)
         
         model.load_state_dict(checkpoint['state_dict'])
         print(f"=> loaded model from '{opt.resume}' for pruning")
@@ -629,7 +629,7 @@ if __name__ == "__main__":
         # All architectures now expect the checkpoint in the 'checkpoints' subdirectory
         if not os.path.exists(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')):
             raise FileNotFoundError(f"No checkpoint found at '{join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')}'")
-        checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage)
+        checkpoint = torch.load(join(opt.resume, 'checkpoints', 'checkpoint.pth.tar'), map_location=lambda storage, loc: storage, weights_only=False)
         
         model.load_state_dict(checkpoint['state_dict'])
         print(f"=> loaded model from '{opt.resume}' for quantization")
