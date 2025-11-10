@@ -9,9 +9,13 @@ def static_quantization(model, data_loader, device):
     """
     print("Applying static quantization...")
     model.eval()
-    # Specify quantization configuration
-    # 'fbgemm' is a backend for x86 platforms
-    model.qconfig = quant.get_default_qconfig('fbgemm')
+    # Specify quantization configuration based on the device
+    if device.type == 'cuda':
+        # Use a qconfig that is supported by the CUDA backend
+        model.qconfig = quant.get_default_qconfig('qnnpack')
+    else:
+        # 'fbgemm' is the default for x86 CPUs
+        model.qconfig = quant.get_default_qconfig('fbgemm')
     
     # Do not quantize the NetVLAD layer
     model.pool.qconfig = None
@@ -57,8 +61,11 @@ def qat_quantization(model, data_loader, device, epochs=1):
     """
     print("Applying Quantization-Aware Training...")
     model.train()
-    # Specify quantization configuration for QAT
-    model.qconfig = quant.get_default_qat_qconfig('fbgemm')
+    # Specify quantization configuration for QAT based on the device
+    if device.type == 'cuda':
+        model.qconfig = quant.get_default_qat_qconfig('qnnpack')
+    else:
+        model.qconfig = quant.get_default_qat_qconfig('fbgemm')
     
     # Prepare the model for QAT.
     quant.prepare_qat(model, inplace=True)
