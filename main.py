@@ -392,7 +392,7 @@ def get_model(opt, device):
     return model
 
 if __name__ == "__main__":
-    global writer
+
     opt = parser.parse_args()
 
     restore_var = ['lr', 'lrStep', 'lrGamma', 'weightDecay', 'momentum', 
@@ -554,6 +554,7 @@ if __name__ == "__main__":
         
     elif opt.mode == 'train':
         print('===> Training')
+        best_metric=0
         for epoch in range(opt.start_epoch, opt.nEpochs + 1):
             train(epoch)
             if (epoch % opt.evalEvery) == 0:
