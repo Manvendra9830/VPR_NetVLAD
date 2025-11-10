@@ -8,14 +8,13 @@ def static_quantization(model, data_loader, device):
     Requires calibration with a data_loader.
     """
     print("Applying static quantization...")
+    # Force quantization to run on CPU to avoid cuDNN errors
+    quant_device = torch.device('cpu')
+    model = model.to(quant_device)
+    
     model.eval()
-    # Specify quantization configuration based on the device
-    if device.type == 'cuda':
-        # Use a qconfig that is supported by the CUDA backend
-        model.qconfig = quant.get_default_qconfig('qnnpack')
-    else:
-        # 'fbgemm' is the default for x86 CPUs
-        model.qconfig = quant.get_default_qconfig('fbgemm')
+    # Specify quantization configuration for CPU
+    model.qconfig = quant.get_default_qconfig('fbgemm')
     
     # Do not quantize the NetVLAD layer
     model.pool.qconfig = None
@@ -44,7 +43,7 @@ def static_quantization(model, data_loader, device):
         for i, (input, _) in enumerate(data_loader):
             # The model forward pass is used to calibrate the observers
             if input.dim() == 4: # Ensure input is a batch of images
-                model(input.to(device))
+                model(input.to(quant_device)) # Move calibration data to CPU
             # Use a small number of batches for calibration
             if i > 10:
                 break
@@ -53,6 +52,9 @@ def static_quantization(model, data_loader, device):
     # Convert the observed model to a quantized model.
     quant.convert(model, inplace=True)
     print("Static quantization applied.")
+    
+    # Move the model back to the original device
+    model = model.to(device)
     return model
 
 def qat_quantization(model, data_loader, device, epochs=1):
@@ -60,12 +62,13 @@ def qat_quantization(model, data_loader, device, epochs=1):
     Applies Quantization-Aware Training (QAT).
     """
     print("Applying Quantization-Aware Training...")
+    # Force quantization to run on CPU to avoid cuDNN errors
+    quant_device = torch.device('cpu')
+    model = model.to(quant_device)
+
     model.train()
-    # Specify quantization configuration for QAT based on the device
-    if device.type == 'cuda':
-        model.qconfig = quant.get_default_qat_qconfig('qnnpack')
-    else:
-        model.qconfig = quant.get_default_qat_qconfig('fbgemm')
+    # Specify quantization configuration for QAT on CPU
+    model.qconfig = quant.get_default_qat_qconfig('fbgemm')
     
     # Prepare the model for QAT.
     quant.prepare_qat(model, inplace=True)
@@ -79,7 +82,7 @@ def qat_quantization(model, data_loader, device, epochs=1):
         for i, (input, _) in enumerate(data_loader):
             if input.dim() == 4: # Ensure input is a batch of images
                 optimizer.zero_grad()
-                output = model(input.to(device))
+                output = model(input.to(quant_device)) # Move QAT data to CPU
                 # In a real scenario, you would compute a loss based on your task
                 # For this example, we use a dummy loss
                 loss = output.sum() 
@@ -94,4 +97,7 @@ def qat_quantization(model, data_loader, device, epochs=1):
     model.eval()
     quant.convert(model, inplace=True)
     print("QAT quantization applied.")
+    
+    # Move the model back to the original device
+    model = model.to(device)
     return model
