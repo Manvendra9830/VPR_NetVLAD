@@ -2,7 +2,7 @@ import torch
 import torch.quantization as quant
 from torch.quantization import prepare, convert, prepare_qat
 
-def static_quantization(model, data_loader):
+def static_quantization(model, data_loader, device):
     """
     Applies post-training static quantization to a model.
     Requires calibration with a data_loader.
@@ -40,7 +40,7 @@ def static_quantization(model, data_loader):
         for i, (input, _) in enumerate(data_loader):
             # The model forward pass is used to calibrate the observers
             if input.dim() == 4: # Ensure input is a batch of images
-                model(input)
+                model(input.to(device))
             # Use a small number of batches for calibration
             if i > 10:
                 break
@@ -51,7 +51,7 @@ def static_quantization(model, data_loader):
     print("Static quantization applied.")
     return model
 
-def qat_quantization(model, data_loader, epochs=1):
+def qat_quantization(model, data_loader, device, epochs=1):
     """
     Applies Quantization-Aware Training (QAT).
     """
@@ -72,7 +72,7 @@ def qat_quantization(model, data_loader, epochs=1):
         for i, (input, _) in enumerate(data_loader):
             if input.dim() == 4: # Ensure input is a batch of images
                 optimizer.zero_grad()
-                output = model(input)
+                output = model(input.to(device))
                 # In a real scenario, you would compute a loss based on your task
                 # For this example, we use a dummy loss
                 loss = output.sum() 

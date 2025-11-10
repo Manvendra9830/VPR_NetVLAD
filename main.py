@@ -644,11 +644,11 @@ if __name__ == "__main__":
 
         # Apply quantization
         if opt.quantization_type == 'static':
-            model = static_quantization(model, quant_data_loader)
+            model = static_quantization(model, quant_data_loader, device)
         elif opt.quantization_type == 'qat':
             # QAT fine-tuning should be done on the training set, but for a quick test, we use the val set.
             print("Warning: Using validation set for QAT fine-tuning. For best results, use the training set.")
-            model = qat_quantization(model, quant_data_loader, epochs=1)
+            model = qat_quantization(model, quant_data_loader, device, epochs=1)
         
         # Save the quantized model
         quantized_model_dir = f"{opt.resume}_quantized_{opt.quantization_type}"
