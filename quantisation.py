@@ -70,6 +70,28 @@ def qat_quantization(model, data_loader, device, epochs=1):
     # Specify quantization configuration for QAT on CPU
     model.qconfig = quant.get_default_qat_qconfig('fbgemm')
     
+    # Fuse layers for better performance and compatibility
+    print("Fusing modules for QAT...")
+    # The VGG encoder is a nn.Sequential, we can iterate and fuse
+    # QAT requires fusion before preparing the model
+    layers_to_fuse = []
+    for i in range(len(model.encoder)):
+        # Check for Conv-BN-ReLU triplets
+        if (i + 2 < len(model.encoder) and
+            isinstance(model.encoder[i], torch.nn.Conv2d) and
+            isinstance(model.encoder[i+1], torch.nn.BatchNorm2d) and
+            isinstance(model.encoder[i+2], torch.nn.ReLU)):
+            layers_to_fuse.append([str(i), str(i+1), str(i+2)])
+        # Check for Conv-ReLU pairs
+        elif (i + 1 < len(model.encoder) and
+              isinstance(model.encoder[i], torch.nn.Conv2d) and
+              isinstance(model.encoder[i+1], torch.nn.ReLU)):
+            layers_to_fuse.append([str(i), str(i+1)])
+
+    if layers_to_fuse:
+        torch.quantization.fuse_modules(model.encoder, layers_to_fuse, inplace=True)
+        print(f"Fused {len(layers_to_fuse)} layer groups for QAT.")
+
     # Prepare the model for QAT.
     quant.prepare_qat(model, inplace=True)
     
