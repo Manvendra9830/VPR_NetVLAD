@@ -75,6 +75,9 @@ def qat_quantization(model, data_loader, device, epochs=1):
         if isinstance(module, torch.nn.MaxPool2d):
             module.qconfig = None
 
+    # Do not quantize the NetVLAD layer
+    model.pool.qconfig = None
+
     # Fuse layers for better performance and compatibility
     print("Fusing modules for QAT...")
     # The VGG encoder is a nn.Sequential, we can iterate and fuse
