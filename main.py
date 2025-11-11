@@ -436,6 +436,11 @@ if __name__ == "__main__":
     else:
         device = torch.device('cpu')
 
+    # Force CPU for quantization to avoid backend errors
+    if opt.mode.lower() == 'quantize':
+        device = torch.device('cpu')
+        print("===> Running quantization on CPU to avoid backend errors.")
+
     random.seed(opt.seed)
     np.random.seed(opt.seed)
     torch.manual_seed(opt.seed)
