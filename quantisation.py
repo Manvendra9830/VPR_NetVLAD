@@ -70,6 +70,11 @@ def qat_quantization(model, data_loader, device, epochs=1):
     # Specify quantization configuration for QAT on CPU
     model.qconfig = quant.get_default_qat_qconfig('fbgemm')
     
+    # Do not quantize the MaxPool layers, as they are not supported in some QAT backends
+    for module in model.encoder.modules():
+        if isinstance(module, torch.nn.MaxPool2d):
+            module.qconfig = None
+
     # Fuse layers for better performance and compatibility
     print("Fusing modules for QAT...")
     # The VGG encoder is a nn.Sequential, we can iterate and fuse
