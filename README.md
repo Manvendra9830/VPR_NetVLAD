@@ -74,7 +74,7 @@ VPR_NetVLAD/
 ```
 
 **Download Links:**
-1.  **Dataset Definitions (`.mat` files):** [Download Link](http://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz)
+1.  **Dataset Definitions (`.mat` files):** Download Link = http://www.di.ens.fr/willow/research/netvlad/data/netvlad_v100_datasets.tar.gz
     *   **Action:** Extract and place the `datasets` and `groundtruth` folders in the project root.
 2.  **Image Files (`.jpg` files):** [Download Link](https://www.kaggle.com/datasets/duongoku/pittsburgh250k)
     *   **Action:** Extract and place all image folders (`000`-`010`, `queries_real`) in the project root.
